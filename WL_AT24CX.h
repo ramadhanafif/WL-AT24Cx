@@ -13,9 +13,7 @@
 
 #include "AT24CX.h"
 
-template <typename data_t>
-struct wl_data_t
-{
+template <typename data_t> struct wl_data_t {
     data_t data;
     uint32_t ptr;
 };
@@ -25,10 +23,8 @@ struct wl_data_t
  *
  * @tparam data_t data type to be stored in eeprom
  */
-template <class data_t>
-class WL_AT24CX : public AT24CX
-{
-public:
+template <class data_t> class WL_AT24CX : public AT24CX {
+  public:
     /**
      * @brief Construct a new WLAT24CX object
      *
@@ -40,18 +36,19 @@ public:
      * @param eeprom_size eeprom size, in bytes
      */
     WL_AT24CX(byte index, byte pageSize, uint32_t base_addr,
-              uint32_t num_of_data, bool wl_en, uint32_t eeprom_size = 1 << 15) : AT24CX(index, pageSize)
+              uint32_t num_of_data, bool wl_en, uint32_t eeprom_size = 1 << 15)
+        : AT24CX(index, pageSize)
     {
-        this->base_addr = base_addr;
+        this->base_addr   = base_addr;
         this->num_of_data = num_of_data;
-        this->wl_enable = wl_en;
+        this->wl_enable   = wl_en;
         this->eeprom_size = eeprom_size;
 
         if (wl_enable)
             end_addr = base_addr + wl_data_size * num_of_data;
         else
             end_addr = base_addr + data_size * num_of_data;
-        end_taddr = this->num_of_data - 1; // taddr start from 0
+        end_taddr  = this->num_of_data - 1; // taddr start from 0
         base_taddr = addr_to_taddr(base_addr);
     }
 
@@ -66,20 +63,19 @@ public:
         uint32_t current_ptr, next_ptr;
 
         // Read from base address to end address
-        for (uint32_t taddr = base_taddr; taddr <= end_taddr; taddr++)
-        {
+        for (uint32_t taddr = base_taddr; taddr <= end_taddr; taddr++) {
             current_ptr = wl_peek(taddr).ptr;
-            next_ptr = wl_peek(taddr + 1).ptr;
+            next_ptr    = wl_peek(taddr + 1).ptr;
 
             // ESP_LOGI("EEPROM", "TADDR %d: current ptr = %d, next ptr %d", taddr, current_ptr, next_ptr);
 
             // IF found break in pointer array
-            if ((next_ptr - current_ptr != 1) || (next_ptr == pointer_max))
-            {
-                taddr_current = (taddr + 1) % num_of_data; // circular taddr
-                taddr_last = taddr;
+            if ((next_ptr - current_ptr != 1) || (next_ptr == pointer_max)) {
+                taddr_current  = (taddr + 1) % num_of_data; // circular taddr
+                taddr_last     = taddr;
                 wl_ptr_current = current_ptr + 1;
-                ESP_LOGI("EEPROM", "Obtained taddr = %d, ptr %d", taddr_current, wl_ptr_current);
+                ESP_LOGI("EEPROM", "Obtained taddr = %d, ptr %d", taddr_current,
+                         wl_ptr_current);
 
                 break;
             }
@@ -99,10 +95,10 @@ public:
         wl_data_t<data_t> buffer = {.data = data, .ptr = wl_ptr_current};
 
         uint32_t addr = taddr_to_addr(taddr_current);
-        write(addr, reinterpret_cast<byte *>(&buffer), wl_data_size);
+        write(addr, reinterpret_cast<byte*>(&buffer), wl_data_size);
 
         wl_ptr_current++;
-        taddr_last = taddr_current;
+        taddr_last    = taddr_current;
         taddr_current = (taddr_current + 1) % num_of_data;
     }
 
@@ -117,7 +113,7 @@ public:
         // enforce circular addressing on non-wl methods
         uint32_t addr = taddr_to_addr(taddr % num_of_data);
         data_t buffer = data;
-        write(addr, reinterpret_cast<byte *>(&buffer), data_size);
+        write(addr, reinterpret_cast<byte*>(&buffer), data_size);
     }
 
     /**
@@ -129,7 +125,8 @@ public:
     data_t read_mem(const uint32_t taddr)
     {
         data_t out;
-        read(taddr_to_addr(taddr % num_of_data), reinterpret_cast<byte *>(&out), data_size);
+        read(taddr_to_addr(taddr % num_of_data), reinterpret_cast<byte*>(&out),
+             data_size);
         return out;
     }
 
@@ -139,10 +136,7 @@ public:
      *
      * @return * uint32_t end address
      */
-    uint32_t get_end_addr()
-    {
-        return end_addr;
-    }
+    uint32_t get_end_addr() { return end_addr; }
 
     /**
      * @brief WIPE data from eeprom, reset to 0xFF
@@ -153,10 +147,9 @@ public:
     void wipe(uint32_t size)
     {
         uint64_t max = -1;
-        for (int i = 0; i < size; i += sizeof(uint64_t))
-        {
+        for (int i = 0; i < size; i += sizeof(uint64_t)) {
             ESP_LOGD("EEPROM", "Wiping process: %.2f", 100.0 * i / size);
-            write(i, reinterpret_cast<byte *>(&max), sizeof(uint64_t));
+            write(i, reinterpret_cast<byte*>(&max), sizeof(uint64_t));
         }
     }
     void wipe() { wipe(eeprom_size); }
@@ -166,10 +159,7 @@ public:
      *
      * @return data_t data last stored
      */
-    data_t wl_get_last_data()
-    {
-        return wl_peek(taddr_last).data;
-    }
+    data_t wl_get_last_data() { return wl_peek(taddr_last).data; }
 
     /**
      * @brief read data and pointer stored by the wear-leveling system
@@ -180,13 +170,13 @@ public:
     wl_data_t<data_t> wl_peek(uint32_t taddr)
     {
         wl_data_t<data_t> out;
-        read(taddr_to_addr(taddr), reinterpret_cast<byte *>(&out), wl_data_size);
+        read(taddr_to_addr(taddr), reinterpret_cast<byte*>(&out), wl_data_size);
         // ESP_LOGD("EEPROM", "Obtained: index %d, addr %d, ptr %d, data %f",
         //  taddr, taddr_to_addr(taddr), out.ptr, out.data);
         return out;
     }
 
-private:
+  private:
     uint32_t eeprom_size;
 
     uint32_t base_addr;
