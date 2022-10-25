@@ -88,7 +88,7 @@ class WL_AT24CX : public AT24CX {
 
     /**
      * @brief push data to eeprom memory
-     * only for objects with eeprom enabled. Otherwise program aborted.
+     * contains assertion check for WL ENABLE!!
      *
      * @param data data to be put in eeprom
      */
