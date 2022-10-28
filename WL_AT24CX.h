@@ -13,6 +13,11 @@
 
 #include "AT24CX.h"
 
+/**
+ * @brief BOOL to STRING macro function
+ */
+#define B2S(__logic__) ((__logic__) ? "TRUE" : "FALSE")
+
 template <typename data_t>
 struct wl_data_t {
     data_t data;
@@ -58,6 +63,9 @@ class WL_AT24CX : public AT24CX {
             end_addr = base_addr + data_size * num_of_data;
         end_taddr  = this->num_of_data - 1; // taddr start from 0
         base_taddr = addr_to_taddr(base_addr);
+
+        ESP_LOGD("EEPROM", "Starting EEPROM, size of wl_data_t: %d bytes", wl_data_size);
+        ESP_LOGD("EEPROM", "PTR MAX is defined as %u", pointer_max);
     }
 
     /**
@@ -130,53 +138,84 @@ class WL_AT24CX : public AT24CX {
         wl_data_t<data_t> current, next;
 
         // Find pointer break
+        uint32_t dataChecked = 0;
         uint32_t taddr;
         for (taddr = base_taddr; taddr <= end_taddr; taddr++) {
+            bool maxIntFound   = false;
+            bool ptrBreakFound = false;
+
             current = wl_peek(taddr);
             next    = wl_peek(taddr + 1); // FIXME: might have bug if taddr == end_taddr?
 
-            // found break in pointer array
-            if ((next.ptr - current.ptr != 1) || (next.ptr == pointer_max))
+            /* ESP_LOGD(
+                "EEPROM",
+                "Current ptr is %u, next ptr is %u, current is max %s, next is max %s",
+                current.ptr,
+                next.ptr,
+                B2S(current.ptr == pointer_max),
+                B2S(next.ptr == pointer_max)); */
+            // seek for break in pointer array
+            if (next.ptr - current.ptr != 1)
+                ptrBreakFound = true;
+
+            // seek for maxInt
+            if (next.ptr == pointer_max)
+                maxIntFound = true;
+
+            if (maxIntFound) {
+                if (current.ptr == pointer_max) { // only happens after total wipe
+                    taddr_last     = 0;
+                    taddr_current  = 0;
+                    wl_ptr_current = 0;
+                    return; // no need to seek any further
+                } else {
+                    taddr_last     = taddr;
+                    taddr_current  = taddr_step(taddr); // equivalent to taddr+1
+                    wl_ptr_current = current.ptr + 1;
+                    break;
+                }
+            }
+
+            // pointer break is found, store the taddr info and do a crc checking
+            if (ptrBreakFound) { // this covers if nextptr = 0xffff_ffff
+                taddr_last     = taddr;
+                taddr_current  = taddr_step(taddr); // equivalent to taddr+1
+                wl_ptr_current = current.ptr + 1;
                 break;
-
-            assert(taddr == end_taddr); // should not reach here
-
-            // if (taddr == end_taddr) {
-            //     taddr_current = 0;
-            //     taddr_last    = 0;
-
-            //     wl_ptr_current = 0;
-            //     // TODO: raise status flag to inform function get last WL data to return 0 as well
-
-            //     goto out;
-            // }
+            }
         }
+        dataChecked = taddr;
 
         // find data with correct crc
         uint32_t check_attempt = 0;
         bool dataisvalid;
         do {
-            assert(check_attempt <= num_of_data); // should be found before reaches num of data
-
+            current     = wl_peek(taddr);
             dataisvalid = isdatavalid(current);
+            ESP_LOGD(
+                "EEPROM WL",
+                "CRC %s, data is %u, ptr is %u, crc is %u should be %u",
+                dataisvalid ? "MATCH" : "MISMATCH",
+                current.data,
+                current.ptr,
+                current.crc,
+                calc_crc(current.data));
             if (!dataisvalid) {
                 // if data crc mismatch, step backwards
-                taddr_step(taddr, false);
-
-                current = wl_peek(taddr);
+                taddr = taddr_step(taddr, false); // step backwards, equivalent to taddr-1
+                check_attempt++;
+            } else { // data is valid, get out from loop
+                break;
             }
-            check_attempt++;
-        } while (!dataisvalid);
+            if (check_attempt > dataChecked) {
+                /* taddr_last     = 0;
+                taddr_current  = 0;
+                wl_ptr_current = 0; */
+                assert(0);
+            }
+        } while (check_attempt <= dataChecked);
 
-        // Data found, set as current taddr and set next pointer;
-        taddr_last = taddr; // set taddr last to obtain last data stored
-
-        taddr_step(taddr);
-        taddr_current = taddr; // Preincrement taddr location
-
-        wl_ptr_current = current.ptr + 1; // Preincrement next pointer to be written
-
-        ESP_LOGI("EEPROM", "Obtained taddr = %u, ptr %u", taddr_current, wl_ptr_current);
+        ESP_LOGI("EEPROM", "SET last taddr = %u, ptr %u", taddr_current, wl_ptr_current);
     }
 
     /**
@@ -189,7 +228,11 @@ class WL_AT24CX : public AT24CX {
     {
         assert(wl_enable);
 
-        wl_data_t<data_t> buffer = { .data = data, .ptr = wl_ptr_current };
+        wl_data_t<data_t> buffer = {
+            .data = data,           // Data to be stored
+            .ptr  = wl_ptr_current, // Pointer to facilitate wear-leveling
+            .crc  = calc_crc(data)  // CRC
+        };
 
         uint32_t addr = taddr_to_addr(taddr_current);
         write(addr, reinterpret_cast<byte *>(&buffer), wl_data_size);
@@ -263,7 +306,10 @@ class WL_AT24CX : public AT24CX {
      */
     data_t wl_get_last_data()
     {
-        return wl_peek(taddr_last).data;
+        if (!memisWiped)
+            return wl_peek(taddr_last).data;
+        else
+            return 0;
     }
 
     /**
@@ -303,6 +349,8 @@ class WL_AT24CX : public AT24CX {
 
     uint32_t pointer_max = std::numeric_limits<uint32_t>::max();
 
+    bool memisWiped = false;
+
     uint32_t taddr_to_addr(uint32_t taddr)
     {
         uint32_t addr;
@@ -334,9 +382,10 @@ class WL_AT24CX : public AT24CX {
     uint8_t calc_crc(data_t data)
     {
         uint8_t output = 0;
-        data_t *dataptr;
+        data_t temp    = data;
+        uint8_t *dataptr;
 
-        *dataptr = data;
+        dataptr = reinterpret_cast<uint8_t *>(&temp);
 
         for (size_t i = 0; i < sizeof(data_t); i++) {
             output ^= dataptr[i];
@@ -346,22 +395,24 @@ class WL_AT24CX : public AT24CX {
     }
 
     /**
-     * @brief function to change taddr forward and backwards in circular manner
+     * @brief function to change taddr forward and backward in circular manner
      *
      * @param taddr reference to taddr
      * @param forward defaults to true, set false to step backwards
      */
-    void taddr_step(uint32_t &taddr, bool forward = true)
+    uint32_t taddr_step(uint32_t taddr, bool forward = true)
     {
+        uint32_t output;
         if (forward) {
-            taddr = (taddr + 1) % num_of_data;
+            output = (taddr + 1) % num_of_data;
         } else { // step backwards
             // if reaches end of taddr
             if (taddr == 0)
-                taddr = end_taddr;
+                output = end_taddr;
             else
-                taddr--;
+                output = taddr - 1;
         }
+        return output;
     }
 
     /**
