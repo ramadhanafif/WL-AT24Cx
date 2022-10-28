@@ -204,7 +204,10 @@ class WL_AT24CX : public AT24CX {
                 // if data crc mismatch, step backwards
                 taddr = taddr_step(taddr, false); // step backwards, equivalent to taddr-1
                 check_attempt++;
-            } else { // data is valid, get out from loop
+            } else { // data is valid. Store info, then get out from loop
+                taddr_last     = taddr;
+                taddr_current  = taddr_step(taddr); // equivalent to taddr+1
+                wl_ptr_current = current.ptr + 1;
                 break;
             }
             if (check_attempt > dataChecked) {
