@@ -214,7 +214,9 @@ class WL_AT24CX : public AT24CX {
                 /* taddr_last     = 0;
                 taddr_current  = 0;
                 wl_ptr_current = 0; */
-                assert(0);
+                ESP_LOGE("EEPROM", "OVERCHECK ERROR");
+                return;
+                // assert(check_attempt < dataChecked);
             }
         } while (check_attempt <= dataChecked);
 
